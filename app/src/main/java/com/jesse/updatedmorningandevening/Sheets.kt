@@ -16,8 +16,11 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -60,12 +63,30 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+
+/**
+ * Absorbs leftover upward scroll/fling velocity after the inner scroll container reaches the bottom,
+ * preventing Material 3's ModalBottomSheet from triggering an upward spring oscillation at the top anchor.
+ */
+private val AbsorbUpwardSheetFling = object : NestedScrollConnection {
+    override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset =
+        if (available.y < 0f) Offset(0f, available.y) else Offset.Zero
+
+    override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity =
+        if (available.y < 0f) Velocity(0f, available.y) else Velocity.Zero
+}
 
 @Composable
 private fun SectionLabel(text: String) {
@@ -80,17 +101,21 @@ fun AppearanceSheet(s: ReaderSettings, onDismiss: () -> Unit) {
     var tab by remember { mutableIntStateOf(0) }
     val tabs = listOf("Theme", "Text", "Page")
 
+    val maxSheetHeight = (LocalConfiguration.current.screenHeightDp * 0.88f).dp
     ModalBottomSheet(
         onDismissRequest = { s.save(); onDismiss() },
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = t.bg,
         contentColor = t.fg,
         scrimColor = Color.Black.copy(alpha = 0.16f),
+        contentWindowInsets = { WindowInsets.navigationBars },
     ) {
         Column(
             Modifier
+                .heightIn(max = maxSheetHeight)
                 .padding(horizontal = 24.dp)
                 .padding(bottom = 28.dp)
+                .nestedScroll(AbsorbUpwardSheetFling)
                 .verticalScroll(rememberScrollState()),
         ) {
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
@@ -382,8 +407,22 @@ fun SettingsSheet(
             onDismiss = { pickStart = false },
         ) { day -> pickStart = false; s.startPlan(day) }
     }
-    ModalBottomSheet(onDismissRequest = { s.save(); onDismiss() }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = t.bg, contentColor = t.fg) {
-        Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp).verticalScroll(rememberScrollState())) {
+    val maxSheetHeight = (LocalConfiguration.current.screenHeightDp * 0.88f).dp
+    ModalBottomSheet(
+        onDismissRequest = { s.save(); onDismiss() },
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = t.bg,
+        contentColor = t.fg,
+        contentWindowInsets = { WindowInsets.navigationBars },
+    ) {
+        Column(
+            Modifier
+                .heightIn(max = maxSheetHeight)
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp)
+                .nestedScroll(AbsorbUpwardSheetFling)
+                .verticalScroll(rememberScrollState()),
+        ) {
             Text(
                 "Settings",
                 fontSize = 22.sp,
@@ -996,14 +1035,21 @@ fun FavoritesSheet(
     val sorted = remember(s.favorites, s.notes) { (s.favorites + s.notes.keys).sorted() }
     val edData = library.edition(s.edition)
 
+    val maxSheetHeight = (LocalConfiguration.current.screenHeightDp * 0.88f).dp
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = t.bg,
         contentColor = t.fg,
+        contentWindowInsets = { WindowInsets.navigationBars },
     ) {
         Column(
-            Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp).verticalScroll(rememberScrollState()),
+            Modifier
+                .heightIn(max = maxSheetHeight)
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 32.dp)
+                .nestedScroll(AbsorbUpwardSheetFling)
+                .verticalScroll(rememberScrollState()),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Icon(Icons.Filled.Favorite, contentDescription = null, tint = t.accent)
