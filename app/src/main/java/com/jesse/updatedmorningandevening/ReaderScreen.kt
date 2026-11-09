@@ -255,7 +255,7 @@ fun ReaderScreen(
                                     close()
                                 }
                                 clipPath(frontPath) {
-                                    drawContent()
+                                    this@drawWithContent.drawContent()
 
                                     // Shadow cast by the curled flap back onto the flat front page
                                     val backShadowW = (baseCurlW * 0.45f).coerceAtLeast(18f)
@@ -320,7 +320,7 @@ fun ReaderScreen(
                                         rotate(foldAngleDeg)
                                         translate(-midFoldX, -midFoldY)
                                     }) {
-                                        drawContent()
+                                        this@drawWithContent.drawContent()
                                     }
                                     // Paper opacity veil over the reversed bleed-through text
                                     drawRect(backsideColor.copy(alpha = if (pagePalette.dark) 0.85f else 0.82f))
