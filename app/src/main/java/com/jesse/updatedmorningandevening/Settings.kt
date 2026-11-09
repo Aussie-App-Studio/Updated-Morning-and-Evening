@@ -52,6 +52,10 @@ enum class PageTurnStyle(val label: String, val blurb: String) {
         "Slide",
         "Standard horizontal slide used by Kindle and Apple Books.",
     ),
+    PageCurl(
+        "Page Curl",
+        "Realistic curling paper fold with a curved peel, paper underside, and cast shadow.",
+    ),
     BookCurl(
         "Book Page",
         "3D page turn hinged at the left spine with a soft shadow over the next devotion.",

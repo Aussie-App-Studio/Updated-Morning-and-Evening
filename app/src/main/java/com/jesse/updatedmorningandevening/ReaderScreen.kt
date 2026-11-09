@@ -61,9 +61,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.zIndex
@@ -156,6 +162,7 @@ fun ReaderScreen(
         scope.launch {
             when (settings.pageTurnStyle) {
                 PageTurnStyle.None -> pager.scrollToPage(clamped)
+                PageTurnStyle.PageCurl -> pager.animateScrollToPage(clamped, animationSpec = tween(480))
                 PageTurnStyle.BookCurl -> pager.animateScrollToPage(clamped, animationSpec = tween(420))
                 PageTurnStyle.Depth -> pager.animateScrollToPage(clamped, animationSpec = tween(360))
                 PageTurnStyle.Slide -> pager.animateScrollToPage(clamped, animationSpec = tween(320))
@@ -168,8 +175,9 @@ fun ReaderScreen(
             HorizontalPager(state = pager, modifier = Modifier.fillMaxSize(), beyondViewportPageCount = 0) { p ->
                 val pageOffset = ((p - pager.currentPage) - pager.currentPageOffsetFraction).coerceIn(-1f, 1f)
                 val turnStyle = settings.pageTurnStyle
+                val pagePalette = settings.themeFor(p % 2 == 1)
                 val zOrder = when (turnStyle) {
-                    PageTurnStyle.BookCurl, PageTurnStyle.Depth -> if (pageOffset <= 0f) 2f else 1f
+                    PageTurnStyle.PageCurl, PageTurnStyle.BookCurl, PageTurnStyle.Depth -> if (pageOffset <= 0f) 2f else 1f
                     else -> 0f
                 }
                 Box(
@@ -179,6 +187,9 @@ fun ReaderScreen(
                         .graphicsLayer {
                             when (turnStyle) {
                                 PageTurnStyle.Slide -> Unit
+                                PageTurnStyle.PageCurl -> {
+                                    translationX = -pageOffset * size.width
+                                }
                                 PageTurnStyle.BookCurl -> {
                                     translationX = -pageOffset * size.width
                                     if (pageOffset < 0f) {
@@ -206,24 +217,155 @@ fun ReaderScreen(
                             }
                         }
                         .drawWithContent {
-                            drawContent()
-                            when (turnStyle) {
-                                PageTurnStyle.BookCurl -> {
-                                    if (pageOffset < 0f) {
-                                        val shade = (-pageOffset * 0.16f).coerceIn(0f, 0.16f)
-                                        drawRect(Color.Black.copy(alpha = shade))
-                                    } else if (pageOffset > 0f) {
-                                        val underShadow = (pageOffset * 0.24f).coerceIn(0f, 0.24f)
-                                        drawRect(Color.Black.copy(alpha = underShadow))
-                                    }
+                            if (turnStyle == PageTurnStyle.PageCurl && pageOffset < -0.001f && pageOffset > -0.999f) {
+                                val w = size.width
+                                val h = size.height
+                                val progress = (-pageOffset).coerceIn(0f, 1f)
+                                val arch = kotlin.math.sin(progress * Math.PI).toFloat()
+
+                                // Diagonal crease line sweeping from right edge (w) to left spine (0),
+                                // with the lower corner leading slightly like a natural finger peel.
+                                val foldX = w * (1f - progress)
+                                val tiltX = w * 0.14f * arch
+                                val topFoldX = foldX + tiltX * 0.55f
+                                val botFoldX = foldX - tiltX * 0.45f
+
+                                // Conical paper curl width (wider near the bottom peel, narrower near the top)
+                                val baseCurlW = w * (0.25f * arch + 0.07f * (1f - progress) * progress * 4f)
+                                val topCurlW = baseCurlW * 0.72f
+                                val botCurlW = baseCurlW * 1.14f
+                                val topFlapX = topFoldX - topCurlW
+                                val botFlapX = botFoldX - botCurlW
+
+                                // Normal vector perpendicular to the crease (pointing rightwards)
+                                val dx = botFoldX - topFoldX
+                                val dy = h
+                                val len = kotlin.math.hypot(dx, dy).coerceAtLeast(1f)
+                                val nx = dy / len
+                                val ny = -dx / len
+                                val midFoldX = (topFoldX + botFoldX) * 0.5f
+                                val midFoldY = h * 0.5f
+
+                                // 1. Unpeeled flat front of the current page (to the left of the crease)
+                                val frontPath = Path().apply {
+                                    moveTo(0f, 0f)
+                                    lineTo(topFoldX, 0f)
+                                    lineTo(botFoldX, h)
+                                    lineTo(0f, h)
+                                    close()
                                 }
-                                PageTurnStyle.Depth -> {
-                                    if (pageOffset > 0f) {
-                                        val underShadow = (pageOffset * 0.18f).coerceIn(0f, 0.18f)
-                                        drawRect(Color.Black.copy(alpha = underShadow))
-                                    }
+                                clipPath(frontPath) {
+                                    drawContent()
+
+                                    // Shadow cast by the curled flap back onto the flat front page
+                                    val backShadowW = (baseCurlW * 0.45f).coerceAtLeast(18f)
+                                    val midFlapX = (topFlapX + botFlapX) * 0.5f
+                                    drawRect(
+                                        brush = Brush.linearGradient(
+                                            colors = listOf(
+                                                Color.Transparent,
+                                                Color.Black.copy(alpha = 0.22f * arch),
+                                            ),
+                                            start = Offset(midFlapX - nx * backShadowW, midFoldY - ny * backShadowW),
+                                            end = Offset(midFlapX, midFoldY),
+                                        ),
+                                    )
                                 }
-                                else -> Unit
+
+                                // 2. Cast shadow onto the next devotion underneath (to the right of the crease)
+                                val castShadowW = w * 0.18f * arch + 24f * (1f - progress)
+                                val castPath = Path().apply {
+                                    moveTo(topFoldX, 0f)
+                                    lineTo(topFoldX + castShadowW, 0f)
+                                    lineTo(botFoldX + castShadowW, h)
+                                    lineTo(botFoldX, h)
+                                    close()
+                                }
+                                clipPath(castPath) {
+                                    drawRect(
+                                        brush = Brush.linearGradient(
+                                            colors = listOf(
+                                                Color.Black.copy(alpha = 0.34f * (1f - progress * 0.35f)),
+                                                Color.Black.copy(alpha = 0.10f * (1f - progress * 0.35f)),
+                                                Color.Transparent,
+                                            ),
+                                            start = Offset(midFoldX, midFoldY),
+                                            end = Offset(midFoldX + nx * castShadowW, midFoldY + ny * castShadowW),
+                                        ),
+                                    )
+                                }
+
+                                // 3. The 3D curled paper underside flap
+                                val flapPath = Path().apply {
+                                    moveTo(topFlapX, 0f)
+                                    lineTo(topFoldX, 0f)
+                                    lineTo(botFoldX, h)
+                                    lineTo(botFlapX, h)
+                                    close()
+                                }
+                                val backsideColor = if (pagePalette.dark) {
+                                    lerp(pagePalette.bg, Color.White, 0.08f)
+                                } else {
+                                    lerp(pagePalette.bg, Color(0xFFFDF8EE), 0.35f)
+                                }
+                                clipPath(flapPath) {
+                                    drawRect(backsideColor)
+
+                                    // Faintly mirrored page content bleeding through the back of the paper
+                                    val foldAngleDeg = Math.toDegrees(kotlin.math.atan2(dx.toDouble(), dy.toDouble())).toFloat()
+                                    withTransform({
+                                        translate(midFoldX, midFoldY)
+                                        rotate(-foldAngleDeg)
+                                        scale(scaleX = -1f, scaleY = 1f, pivot = Offset.Zero)
+                                        rotate(foldAngleDeg)
+                                        translate(-midFoldX, -midFoldY)
+                                    }) {
+                                        drawContent()
+                                    }
+                                    // Paper opacity veil over the reversed bleed-through text
+                                    drawRect(backsideColor.copy(alpha = if (pagePalette.dark) 0.85f else 0.82f))
+
+                                    // 3D cylindrical roll lighting & crease shading across the flap
+                                    val midFlapX = (topFlapX + botFlapX) * 0.5f
+                                    val highlightAlpha = if (pagePalette.dark) 0.14f else 0.45f
+                                    drawRect(
+                                        brush = Brush.linearGradient(
+                                            0.00f to Color.Black.copy(alpha = 0.16f),
+                                            0.22f to Color.Transparent,
+                                            0.68f to Color.White.copy(alpha = highlightAlpha),
+                                            0.88f to Color.Black.copy(alpha = 0.05f),
+                                            1.00f to Color.Black.copy(alpha = 0.24f),
+                                            start = Offset(midFlapX, midFoldY),
+                                            end = Offset(midFoldX, midFoldY),
+                                        ),
+                                    )
+                                }
+                            } else {
+                                drawContent()
+                                when (turnStyle) {
+                                    PageTurnStyle.PageCurl -> {
+                                        if (pageOffset > 0f) {
+                                            val underShadow = (pageOffset * 0.12f).coerceIn(0f, 0.12f)
+                                            drawRect(Color.Black.copy(alpha = underShadow))
+                                        }
+                                    }
+                                    PageTurnStyle.BookCurl -> {
+                                        if (pageOffset < 0f) {
+                                            val shade = (-pageOffset * 0.16f).coerceIn(0f, 0.16f)
+                                            drawRect(Color.Black.copy(alpha = shade))
+                                        } else if (pageOffset > 0f) {
+                                            val underShadow = (pageOffset * 0.24f).coerceIn(0f, 0.24f)
+                                            drawRect(Color.Black.copy(alpha = underShadow))
+                                        }
+                                    }
+                                    PageTurnStyle.Depth -> {
+                                        if (pageOffset > 0f) {
+                                            val underShadow = (pageOffset * 0.18f).coerceIn(0f, 0.18f)
+                                            drawRect(Color.Black.copy(alpha = underShadow))
+                                        }
+                                    }
+                                    else -> Unit
+                                }
                             }
                         },
                 ) {
