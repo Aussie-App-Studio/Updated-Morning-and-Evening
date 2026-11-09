@@ -138,7 +138,7 @@ class ReaderSettings(ctx: Context) {
     private val notesSp = appCtx.getSharedPreferences("reader_notes", Context.MODE_PRIVATE)
 
     var edition by mutableStateOf(enumOr(Edition.Modern, sp.getString("edition", null)))
-    var themeMode by mutableStateOf(enumOr(ThemeMode.Single, sp.getString("themeMode", null)))
+    var themeMode by mutableStateOf(enumOr(ThemeMode.MorningEvening, sp.getString("themeMode", null)))
     var singleTheme by mutableStateOf(enumOr(ReaderTheme.Sepia, sp.getString("theme", null)))
     var morningTheme by mutableStateOf(enumOr(ReaderTheme.Sepia, sp.getString("morningTheme", null)))
     var eveningTheme by mutableStateOf(enumOr(ReaderTheme.Dark, sp.getString("eveningTheme", null)))
